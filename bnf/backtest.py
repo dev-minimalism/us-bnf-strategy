@@ -1,4 +1,4 @@
-# bnf_backtest_strategy.py
+# bnf/backtest.py
 """
 BNF 역추세 전략 백테스트 전용 모듈
 
@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+from .strategy import TOP50_STOCKS, BNFParams, calculate_bnf_indicators
 
 warnings.filterwarnings('ignore')
 
@@ -133,14 +135,7 @@ class BNFCounterTrendBacktest:
     """초기화"""
 
     # 미국 시총 50위 종목 (실시간 모니터와 동일)
-    self.top50_stocks = [
-      'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'AVGO',
-      'LLY',
-      'JPM', 'UNH', 'XOM', 'V', 'PG', 'JNJ', 'MA', 'HD', 'CVX', 'MRK',
-      'ABBV', 'KO', 'ADBE', 'PEP', 'COST', 'WMT', 'BAC', 'CRM', 'TMO', 'NFLX',
-      'ACN', 'LIN', 'MCD', 'ABT', 'CSCO', 'AMD', 'PM', 'TXN', 'DHR', 'DIS',
-      'INTC', 'VZ', 'WFC', 'COP', 'BMY', 'NOW', 'CAT', 'NEE', 'UPS', 'RTX'
-    ]
+    self.top50_stocks = list(TOP50_STOCKS)
 
     # 백테스트 설정
     self.initial_capital = initial_capital
@@ -156,7 +151,7 @@ class BNFCounterTrendBacktest:
 
   def _setup_output_directories(self):
     """출력 디렉토리 설정"""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     self.output_base_dir = os.path.join(base_dir, 'bnf_output_files')
     self.results_dir = os.path.join(self.output_base_dir, 'results')
@@ -178,46 +173,14 @@ class BNFCounterTrendBacktest:
           self.reports_dir = base_dir
 
   def _setup_bnf_parameters(self, strategy_mode: str):
-    """BNF 전략 매개변수 설정 (실제 BNF 전략에 맞게 수정)"""
-    # 실제 BNF가 사용한 파라미터
-    self.rsi_period = 14
-    self.williams_period = 14
-    self.ema_short = 20
-    self.ema_long = 25  # BNF가 사용한 25일 이동평균
-    self.volume_ma_period = 20
-    self.max_holding_days = 3  # BNF 스타일: 최대 3일
-
-    # BNF 스타일: 25일 이동평균 대비 하락률 기준
-    self.ma_oversold_threshold = 0.80  # 25일 평균 대비 20% 하락
+    """BNF 전략 매개변수 설정"""
+    self.params = BNFParams.for_mode(strategy_mode)
 
     if strategy_mode == "aggressive":
-      # 공격적: 더 빠른 진입
-      self.rsi_oversold = 40
-      self.rsi_overbought = 60
-      self.williams_oversold = -70
-      self.williams_overbought = -30
-      self.volume_threshold = 1.1
-      self.ma_oversold_threshold = 0.85  # 15% 하락에서도 진입
       print("🔥 공격적 BNF 전략: 빠른 반전 포착")
-
     elif strategy_mode == "balanced":
-      # 균형: 실제 BNF에 가까운 설정
-      self.rsi_oversold = 35
-      self.rsi_overbought = 65
-      self.williams_oversold = -75
-      self.williams_overbought = -25
-      self.volume_threshold = 1.2
-      self.ma_oversold_threshold = 0.80  # 20% 하락
       print("⚖️ 균형 BNF 전략: 실제 BNF 스타일")
-
-    else:  # conservative
-      # 보수적: 더 엄격한 기준
-      self.rsi_oversold = 30
-      self.rsi_overbought = 70
-      self.williams_oversold = -80
-      self.williams_overbought = -20
-      self.volume_threshold = 1.3
-      self.ma_oversold_threshold = 0.75  # 25% 하락
+    else:
       print("🛡️ 보수적 BNF 전략: 강한 반전만 포착")
 
   # ===================================================================================
@@ -225,76 +188,8 @@ class BNFCounterTrendBacktest:
   # ===================================================================================
 
   def calculate_bnf_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
-    """BNF 스타일 기술적 지표 계산 (신호 조건 완화)"""
-    if len(data) < max(self.rsi_period, self.williams_period, self.ema_long):
-      return data
-
-    # RSI 계산
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=self.rsi_period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_period).mean()
-    rs = gain / loss
-    data['RSI'] = 100 - (100 / (1 + rs))
-
-    # Williams %R 계산
-    high_max = data['High'].rolling(window=self.williams_period).max()
-    low_min = data['Low'].rolling(window=self.williams_period).min()
-    data['Williams_R'] = -100 * (high_max - data['Close']) / (
-        high_max - low_min)
-
-    # EMA 계산
-    data['EMA_20'] = data['Close'].ewm(span=self.ema_short).mean()
-    data['EMA_25'] = data['Close'].ewm(span=self.ema_long).mean()  # BNF의 25일
-
-    # 거래량 분석
-    data['Volume_MA'] = data['Volume'].rolling(
-        self.volume_ma_period).mean() if 'Volume' in data.columns else 1
-    data['Volume_Ratio'] = data['Volume'] / data[
-      'Volume_MA'] if 'Volume' in data.columns else 1
-
-    # 가격 모멘텀
-    data['Price_Change_Pct'] = data['Close'].pct_change() * 100
-    data['Price_MA_5'] = data['Close'].rolling(5).mean()
-
-    # BNF 스타일: 25일 이동평균 대비 하락률
-    data['MA25_Ratio'] = data['Close'] / data['EMA_25']
-    data['MA25_Oversold'] = data['MA25_Ratio'] <= self.ma_oversold_threshold
-
-    # 기본 과매수/과매도 조건
-    data['RSI_Oversold'] = data['RSI'] <= self.rsi_oversold
-    data['RSI_Overbought'] = data['RSI'] >= self.rsi_overbought
-    data['Williams_Oversold'] = data['Williams_R'] <= self.williams_oversold
-    data['Williams_Overbought'] = data['Williams_R'] >= self.williams_overbought
-
-    # BNF 스타일 매수 신호 (OR 조건으로 완화)
-    data['BNF_Buy_Signal'] = (
-      # 조건 1: RSI 과매도 + 거래량 증가
-        (data['RSI_Oversold'] & (
-            data['Volume_Ratio'] > self.volume_threshold)) |
-
-        # 조건 2: Williams %R 과매도 + 거래량 증가
-        (data['Williams_Oversold'] & (
-            data['Volume_Ratio'] > self.volume_threshold)) |
-
-        # 조건 3: BNF 핵심 - 25일 평균 대비 큰 하락 + 반등 시작
-        (data['MA25_Oversold'] &
-         (data['Close'] > data['Close'].shift(1)) &  # 반등 시작
-         (data['Volume_Ratio'] > 1.1))  # 거래량 증가
-    )
-
-    # BNF 스타일 매도 신호
-    data['BNF_Sell_Signal'] = (
-      # 조건 1: RSI 과매수
-        data['RSI_Overbought'] |
-
-        # 조건 2: Williams %R 과매수
-        data['Williams_Overbought'] |
-
-        # 조건 3: 25일 평균 대비 충분한 상승 (수익 실현)
-        (data['MA25_Ratio'] >= 1.10)  # 25일 평균 대비 10% 상승시 수익실현
-    )
-
-    return data
+    """BNF 스타일 기술적 지표 계산"""
+    return calculate_bnf_indicators(data, self.params)
 
   # ===================================================================================
   # BNF 백테스트 실행
@@ -312,8 +207,8 @@ class BNFCounterTrendBacktest:
         print(f"❌ {symbol}: 데이터 없음", end="")
         return None
 
-      if len(data) < self.ema_long:
-        print(f"❌ {symbol}: 데이터 부족 ({len(data)}일 < {self.ema_long}일)", end="")
+      if len(data) < self.params.ema_long:
+        print(f"❌ {symbol}: 데이터 부족 ({len(data)}일 < {self.params.ema_long}일)", end="")
         return None
 
       # 데이터 품질 검증
@@ -375,7 +270,7 @@ class BNFCounterTrendBacktest:
       # 보유 기간 체크 (BNF 스타일: 최대 3일)
       if position == 1 and entry_date:
         days_held = (current_date - entry_date).days
-        force_exit = days_held >= self.max_holding_days
+        force_exit = days_held >= self.params.max_holding_days
       else:
         force_exit = False
 
@@ -406,9 +301,9 @@ class BNFCounterTrendBacktest:
         else:
           action = 'SELL_SIGNAL'
           # 매도 이유 판별
-          if data.iloc[i]['RSI'] >= self.rsi_overbought:
+          if data.iloc[i]['RSI'] >= self.params.rsi_overbought:
             reason = 'RSI 과매수'
-          elif data.iloc[i]['Williams_R'] >= self.williams_overbought:
+          elif data.iloc[i]['Williams_R'] >= self.params.williams_overbought:
             reason = 'Williams %R 과매수'
           elif data.iloc[i]['Close'] / data.iloc[i]['EMA_25'] >= 1.10:
             reason = '25일 평균 대비 10% 상승'
@@ -698,7 +593,7 @@ class BNFCounterTrendBacktest:
     print(f"💰 총 자금: ${self.initial_capital:,.2f} (BNF 스타일 관리)")
     print(f"📊 대상 종목: {len(stocks_to_test)}개")
     print(f"🎯 전략: BNF 역추세 반전 포착")
-    print(f"⏰ 최대 보유: {self.max_holding_days}일")
+    print(f"⏰ 최대 보유: {self.params.max_holding_days}일")
 
     # 각 종목별 데이터 준비
     stock_data = {}
@@ -720,7 +615,7 @@ class BNFCounterTrendBacktest:
           stock = yf.Ticker(symbol)
           data = stock.history(start=start_date, end=end_date, auto_adjust=True)
 
-          if data.empty or len(data) < self.ema_long:
+          if data.empty or len(data) < self.params.ema_long:
             if retry_count == 0:
               print("데이터 부족", end="")
             break
@@ -804,7 +699,7 @@ class BNFCounterTrendBacktest:
 
     print(f"\n⚡ BNF 통합 포트폴리오 백테스트 실행...")
     print(f"📊 최대 동시 보유: {max_positions}개 종목")
-    print(f"⏰ 최대 보유 기간: {self.max_holding_days}일")
+    print(f"⏰ 최대 보유 기간: {self.params.max_holding_days}일")
 
     for i, date in enumerate(all_dates):
       if (i + 1) % 50 == 0:
@@ -843,7 +738,7 @@ class BNFCounterTrendBacktest:
         entry_date = holding_info['entry_date']
         days_held = (date - entry_date).days
 
-        if days_held >= self.max_holding_days:
+        if days_held >= self.params.max_holding_days:
           # 강제 청산
           current_price = next(
               (s['price'] for s in daily_signals if s['symbol'] == symbol),
@@ -987,7 +882,7 @@ class BNFCounterTrendBacktest:
       'all_trades': all_trades,
       'final_holdings': holdings,
       'max_positions': max_positions,
-      'max_holding_days': self.max_holding_days,
+      'max_holding_days': self.params.max_holding_days,
       **stats
     }
 
@@ -1474,7 +1369,7 @@ class BNFCounterTrendBacktest:
 ⚠️ BNF 전략 주의사항:
 {'=' * 50}
    • 과매수/과매도 반전만 노리는 역추세 전략입니다
-   • 최대 {self.max_holding_days}일 보유 원칙을 철저히 지키세요
+   • 최대 {self.params.max_holding_days}일 보유 원칙을 철저히 지키세요
    • 강한 추세 시장에서는 성과가 제한될 수 있습니다
    • 거래량 증가 확인을 통해 반전 신호의 신뢰도를 높이세요
    • 분산 투자를 통해 개별 종목 리스크를 관리하세요
@@ -1482,11 +1377,11 @@ class BNFCounterTrendBacktest:
 
 📊 사용된 BNF 전략 파라미터:
 {'=' * 50}
-   • RSI: {self.rsi_period}일 (과매도: {self.rsi_oversold}, 과매수: {self.rsi_overbought})
-   • Williams %R: {self.williams_period}일 (과매도: {self.williams_oversold}, 과매수: {self.williams_overbought})
-   • 25일 이동평균 대비 하락률: {(1-self.ma_oversold_threshold)*100:.0f}% 이상
-   • 최대 보유 기간: {self.max_holding_days}일
-   • 거래량 증가 임계값: {self.volume_threshold}배
+   • RSI: {self.params.rsi_period}일 (과매도: {self.params.rsi_oversold}, 과매수: {self.params.rsi_overbought})
+   • Williams %R: {self.params.williams_period}일 (과매도: {self.params.williams_oversold}, 과매수: {self.params.williams_overbought})
+   • 25일 이동평균 대비 하락률: {(1-self.params.ma_oversold_threshold)*100:.0f}% 이상
+   • 최대 보유 기간: {self.params.max_holding_days}일
+   • 거래량 증가 임계값: {self.params.volume_threshold}배
 
 🎯 BNF 전략의 핵심 원칙:
 {'=' * 50}
@@ -1500,8 +1395,8 @@ class BNFCounterTrendBacktest:
 📈 실전 적용 가이드:
 {'=' * 50}
    1. 25일 이동평균 대비 20% 이상 하락한 종목 스크리닝
-   2. RSI < {self.rsi_oversold} AND Williams %R < {self.williams_oversold} 확인
-   3. 거래량이 평균 대비 {self.volume_threshold}배 이상 증가 확인
+   2. RSI < {self.params.rsi_oversold} AND Williams %R < {self.params.williams_oversold} 확인
+   3. 거래량이 평균 대비 {self.params.volume_threshold}배 이상 증가 확인
    4. 매수 후 최대 3일 보유, 목표 수익률 도달시 즉시 매도
    5. 손실 시에도 3일 경과하면 무조건 청산
 

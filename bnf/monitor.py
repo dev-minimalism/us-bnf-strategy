@@ -1,4 +1,4 @@
-# bnf_realtime_monitor.py
+# bnf/monitor.py
 """
 BNF 역추세 전략 실시간 모니터링 시스템
 - 타카시 코테가와(BNF) 스타일 역추세 전략
@@ -23,6 +23,8 @@ import requests
 import yfinance as yf
 from telegram.ext import Application, CommandHandler
 
+from .strategy import TOP50_STOCKS, BNFParams, calculate_bnf_indicators
+
 warnings.filterwarnings('ignore')
 
 
@@ -39,41 +41,13 @@ class BNFCounterTrendMonitor:
     self.telegram_chat_id = telegram_chat_id
 
     # Ticker-to-Korean-name mapping (미국 시총 50위)
-    self.ticker_to_korean = {
-      'AAPL': '애플', 'MSFT': '마이크로소프트', 'GOOGL': '구글', 'AMZN': '아마존',
-      'NVDA': '엔비디아', 'META': '메타', 'TSLA': '테슬라', 'BRK-B': '버크셔',
-      'AVGO': '브로드컴', 'LLY': '일라이 릴리', 'JPM': 'JP모건', 'UNH': '유나이티드헬스',
-      'XOM': '엑슨모빌', 'V': '비자', 'PG': '프록터앤갬블', 'JNJ': '존슨앤존슨',
-      'MA': '마스터카드', 'HD': '홈디포', 'CVX': '쉐브론', 'MRK': '머크',
-      'ABBV': '애브비', 'KO': '코카콜라', 'ADBE': '어도비', 'PEP': '펩시코',
-      'COST': '코스트코', 'WMT': '월마트', 'BAC': '뱅크오브아메리카', 'CRM': '세일즈포스',
-      'TMO': '써모피셔', 'NFLX': '넷플릭스', 'ACN': '액센추어', 'LIN': '린데',
-      'MCD': '맥도날드', 'ABT': '애보트', 'CSCO': '시스코', 'AMD': 'AMD',
-      'PM': '필립모리스', 'TXN': '텍사스인스트루먼츠', 'DHR': '다나허', 'DIS': '디즈니',
-      'INTC': '인텔', 'VZ': '버라이즌', 'WFC': '웰스파고', 'COP': '코노코필립스',
-      'BMY': '브리스톨마이어스', 'NOW': '서비스나우', 'CAT': '캐터필러', 'NEE': '넥스트에라',
-      'UPS': 'UPS', 'RTX': 'RTX'
-    }
+    self.ticker_to_korean = TOP50_STOCKS
 
     # 모니터링 대상 종목 (BNF처럼 엄선된 50개)
     self.watchlist = list(self.ticker_to_korean.keys())
 
-    # BNF 전략 파라미터 (백테스트와 동일하게 수정)
-    self.rsi_period = 14
-    self.williams_period = 14
-    self.ema_short = 20
-    self.ema_long = 25  # BNF가 사용한 25일 이동평균
-    self.volume_ma_period = 20
-
-    # BNF 신호 임계값 (백테스트와 동일)
-    self.rsi_oversold = 35      # 완화된 설정
-    self.rsi_overbought = 65    # 완화된 설정
-    self.williams_oversold = -75
-    self.williams_overbought = -25
-    self.volume_threshold = 1.2
-
-    # BNF 핵심: 25일 이동평균 대비 하락률
-    self.ma_oversold_threshold = 0.80  # 25일 평균 대비 20% 하락
+    # BNF 전략 파라미터 (백테스트 balanced 모드와 동일)
+    self.params = BNFParams.for_mode("balanced")
 
     # 알림 설정
     self.last_alerts = {}
@@ -304,70 +278,7 @@ class BNFCounterTrendMonitor:
 
   def calculate_bnf_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
     """BNF 스타일 기술적 지표 계산 (백테스트와 동일한 로직)"""
-    if len(data) < max(self.rsi_period, self.williams_period, self.ema_long):
-      return data
-
-    # RSI 계산
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=self.rsi_period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_period).mean()
-    rs = gain / loss
-    data['RSI'] = 100 - (100 / (1 + rs))
-
-    # Williams %R 계산
-    high_max = data['High'].rolling(window=self.williams_period).max()
-    low_min = data['Low'].rolling(window=self.williams_period).min()
-    data['Williams_R'] = -100 * (high_max - data['Close']) / (high_max - low_min)
-
-    # EMA 계산 (BNF 스타일: 25일 중심)
-    data['EMA_20'] = data['Close'].ewm(span=self.ema_short).mean()
-    data['EMA_25'] = data['Close'].ewm(span=self.ema_long).mean()  # BNF의 25일
-
-    # 거래량 분석
-    data['Volume_MA'] = data['Volume'].rolling(self.volume_ma_period).mean() if 'Volume' in data.columns else 1
-    data['Volume_Ratio'] = data['Volume'] / data['Volume_MA'] if 'Volume' in data.columns else 1
-
-    # 가격 모멘텀
-    data['Price_Change_Pct'] = data['Close'].pct_change() * 100
-    data['Price_MA_5'] = data['Close'].rolling(5).mean()
-
-    # BNF 스타일: 25일 이동평균 대비 하락률
-    data['MA25_Ratio'] = data['Close'] / data['EMA_25']
-    data['MA25_Oversold'] = data['MA25_Ratio'] <= self.ma_oversold_threshold
-
-    # 기본 과매수/과매도 조건
-    data['RSI_Oversold'] = data['RSI'] <= self.rsi_oversold
-    data['RSI_Overbought'] = data['RSI'] >= self.rsi_overbought
-    data['Williams_Oversold'] = data['Williams_R'] <= self.williams_oversold
-    data['Williams_Overbought'] = data['Williams_R'] >= self.williams_overbought
-
-    # BNF 스타일 매수 신호 (OR 조건으로 완화)
-    data['BNF_Buy_Signal'] = (
-      # 조건 1: RSI 과매도 + 거래량 증가
-        (data['RSI_Oversold'] & (data['Volume_Ratio'] > self.volume_threshold)) |
-
-        # 조건 2: Williams %R 과매도 + 거래량 증가
-        (data['Williams_Oversold'] & (data['Volume_Ratio'] > self.volume_threshold)) |
-
-        # 조건 3: BNF 핵심 - 25일 평균 대비 큰 하락 + 반등 시작
-        (data['MA25_Oversold'] &
-         (data['Close'] > data['Close'].shift(1)) &  # 반등 시작
-         (data['Volume_Ratio'] > 1.1))  # 거래량 증가
-    )
-
-    # BNF 스타일 매도 신호
-    data['BNF_Sell_Signal'] = (
-      # 조건 1: RSI 과매수
-        data['RSI_Overbought'] |
-
-        # 조건 2: Williams %R 과매수
-        data['Williams_Overbought'] |
-
-        # 조건 3: 25일 평균 대비 충분한 상승 (수익 실현)
-        (data['MA25_Ratio'] >= 1.10)  # 25일 평균 대비 10% 상승시 수익실현
-    )
-
-    return data
+    return calculate_bnf_indicators(data, self.params)
 
   def check_bnf_signals(self, symbol: str) -> Dict:
     """BNF 스타일 신호 확인 (25일 평균 로직 추가)"""
@@ -412,9 +323,9 @@ class BNFCounterTrendMonitor:
 
       if buy_signal:
         reasons = []
-        if latest['RSI_Oversold'] and latest['Volume_Ratio'] > self.volume_threshold:
+        if latest['RSI_Oversold'] and latest['Volume_Ratio'] > self.params.volume_threshold:
           reasons.append(f"RSI 과매도({latest['RSI']:.1f})")
-        if latest['Williams_Oversold'] and latest['Volume_Ratio'] > self.volume_threshold:
+        if latest['Williams_Oversold'] and latest['Volume_Ratio'] > self.params.volume_threshold:
           reasons.append(f"Williams 과매도({latest['Williams_R']:.1f})")
         if latest['MA25_Oversold'] and latest['Close'] > prev['Close']:
           reasons.append(f"25일평균 대비 {(1-latest['MA25_Ratio'])*100:.1f}% 하락 반등")

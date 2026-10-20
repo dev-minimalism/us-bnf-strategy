@@ -1,19 +1,17 @@
-# ===================================================================================
-# 2. stop_monitor.sh - 백그라운드 모니터링 중지 스크립트
-# ===================================================================================
-
 #!/bin/bash
 # stop_monitor.sh
 
-echo "⏹️  변동성 폭파 모니터링 중지"
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
+echo "⏹️  BNF 모니터링 중지"
 echo "=========================="
 
 # PID 파일 경로
-PID_FILE="output_files/monitor.pid"
+PID_FILE="bnf_output_files/monitor.pid"
 
 if [ ! -f "$PID_FILE" ]; then
     echo "❌ 실행 중인 모니터링을 찾을 수 없습니다."
-    echo "💡 수동으로 중지하려면: pkill -f 'bnf_main.py.*monitor-default'"
+    echo "💡 수동으로 중지하려면: pkill -f 'bnf --mode monitor-default'"
     exit 1
 fi
 

@@ -3,10 +3,10 @@ BNF 역추세 트레이딩 시스템 - 메인 실행 파일
 타카시 코테가와(BNF) 스타일 역추세 전략
 
 사용법:
-    python bnf_main.py --mode backtest      # BNF 백테스트만 실행
-    python bnf_main.py --mode monitor       # BNF 실시간 모니터링만 실행
-    python bnf_main.py --mode monitor-default  # BNF 백그라운드 모니터링
-    python bnf_main.py --mode both          # 백테스트 후 모니터링 실행 (기본값)
+    python -m bnf --mode backtest      # BNF 백테스트만 실행
+    python -m bnf --mode monitor       # BNF 실시간 모니터링만 실행
+    python -m bnf --mode monitor-default  # BNF 백그라운드 모니터링
+    python -m bnf --mode both          # 백테스트 후 모니터링 실행 (기본값)
 
 텔레그램 설정:
     export US_BNF_STRATEGY_TELEGRAM_BOT_TOKEN="your_bot_token"
@@ -26,15 +26,8 @@ import signal
 import sys
 from datetime import datetime, timedelta
 
-# BNF 모듈 import
-try:
-  from bnf_backtest_strategy import BNFCounterTrendBacktest
-  from bnf_realtime_monitor import BNFCounterTrendMonitor
-except ImportError as e:
-  print(f"❌ BNF 모듈 import 오류: {e}")
-  print(
-    "📁 bnf_backtest_strategy.py와 bnf_realtime_monitor.py 파일이 같은 디렉토리에 있는지 확인하세요.")
-  sys.exit(1)
+from .backtest import BNFCounterTrendBacktest
+from .monitor import BNFCounterTrendMonitor
 
 
 # ===================================================================================
@@ -457,10 +450,10 @@ def main():
       formatter_class=argparse.RawDescriptionHelpFormatter,
       epilog="""
 📖 사용 예시:
-    python bnf_main.py --mode backtest         # BNF 백테스트만 실행
-    python bnf_main.py --mode monitor          # BNF 실시간 모니터링 (대화형)
-    python bnf_main.py --mode monitor-default  # BNF 백그라운드 모니터링
-    python bnf_main.py --mode both             # 백테스트 후 모니터링 (기본값)
+    python -m bnf --mode backtest         # BNF 백테스트만 실행
+    python -m bnf --mode monitor          # BNF 실시간 모니터링 (대화형)
+    python -m bnf --mode monitor-default  # BNF 백그라운드 모니터링
+    python -m bnf --mode both             # 백테스트 후 모니터링 (기본값)
 
 📱 BNF 텔레그램 설정 (통일된 환경변수):
     export US_BNF_STRATEGY_TELEGRAM_BOT_TOKEN="your_bot_token"
@@ -483,10 +476,10 @@ def main():
 
 🔄 백그라운드 실행:
     # Linux/Mac
-    nohup python bnf_main.py --mode monitor-default > /dev/null 2>&1 &
+    nohup python -m bnf --mode monitor-default > /dev/null 2>&1 &
     
     # 프로세스 확인
-    ps aux | grep bnf_main
+    ps aux | grep 'bnf --mode'
     
     # 종료
     kill -TERM [PID]

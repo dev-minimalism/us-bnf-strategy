@@ -1,19 +1,17 @@
-# ===================================================================================
-# 3. status_monitor.sh - 백그라운드 모니터링 상태 확인 스크립트
-# ===================================================================================
-
 #!/bin/bash
 # status_monitor.sh
 
-echo "📊 변동성 폭파 모니터링 상태"
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
+echo "📊 BNF 모니터링 상태"
 echo "========================"
 
 # PID 파일 경로
-PID_FILE="output_files/monitor.pid"
+PID_FILE="bnf_output_files/monitor.pid"
 
 if [ ! -f "$PID_FILE" ]; then
     echo "❌ 모니터링이 실행되지 않고 있습니다."
-    echo "🚀 시작하려면: ./start_monitor.sh"
+    echo "🚀 시작하려면: scripts/start_monitor.sh"
     exit 1
 fi
 
@@ -46,13 +44,13 @@ if ps -p "$PID" > /dev/null 2>&1; then
 
     echo ""
     echo "📂 로그 파일들:"
-    if [ -d "output_files/logs" ]; then
-        ls -la output_files/logs/ | grep "monitor"
+    if [ -d "bnf_output_files/logs" ]; then
+        ls -la bnf_output_files/logs/ | grep "bnf_monitor"
     fi
 
     echo ""
     echo "📋 최근 로그 (마지막 5줄):"
-    LOG_FILE="output_files/logs/monitor_$(date +%Y%m%d).log"
+    LOG_FILE="bnf_output_files/logs/bnf_monitor_$(date +%Y%m%d).log"
     if [ -f "$LOG_FILE" ]; then
         tail -5 "$LOG_FILE"
     else
@@ -62,5 +60,5 @@ if ps -p "$PID" > /dev/null 2>&1; then
 else
     echo "❌ PID $PID 프로세스가 실행되지 않고 있습니다."
     rm -f "$PID_FILE"
-    echo "🚀 시작하려면: ./start_monitor.sh"
+    echo "🚀 시작하려면: scripts/start_monitor.sh"
 fi

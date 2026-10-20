@@ -20,14 +20,14 @@ BNF는 $13,600을 $153 million으로 불린 일본의 전설적인 트레이더�
 - **거래량 검증**: 반전 신호의 신뢰도 향상
 - **고확률 셋업만 선별**: 엄격한 진입 조건
 
-### 2. BNF 백테스트 모듈 (`bnf_backtest_strategy.py`)
+### 2. BNF 백테스트 모듈 (`bnf/backtest.py`)
 - 미국 시총 50위 종목 자동 분석
 - BNF 특화 성과 지표 (평균 보유 기간 포함)
 - 시간 기반 강제 청산 (최대 3일)
 - BNF 스타일 포트폴리오 관리
 - 역추세 전용 리포트 생성
 
-### 3. BNF 실시간 모니터링 (`bnf_realtime_monitor.py`)
+### 3. BNF 실시간 모니터링 (`bnf/monitor.py`)
 - 실시간 반전 신호 감지
 - BNF 특화 텔레그램 알림
 - 포지션 자동 관리 (3일 강제 청산)
@@ -51,10 +51,13 @@ pip install -r requirements.txt
 
 ### 2. 파일 구조
 ```
-bnf_trading_system/
-├── bnf_main.py                     # BNF 메인 실행 파일
-├── bnf_backtest_strategy.py        # BNF 백테스트 모듈
-├── bnf_realtime_monitor.py         # BNF 실시간 모니터링 모듈
+us-bnf-strategy/
+├── bnf/                            # BNF 패키지
+│   ├── __main__.py                 # 메인 실행 파일 (python -m bnf)
+│   ├── strategy.py                 # 공통 전략: 지표·신호·파라미터·종목 목록
+│   ├── backtest.py                 # 백테스트 모듈
+│   └── monitor.py                  # 실시간 모니터링 모듈
+├── scripts/                        # 백그라운드 실행·systemd 설치 스크립트
 ├── requirements.txt                # 필수 라이브러리
 ├── bnf_output_files/               # BNF 결과 저장 폴더
 │   ├── results/                    # 백테스트 결과 CSV
@@ -69,16 +72,16 @@ bnf_trading_system/
 ### 기본 실행
 ```bash
 # BNF 백테스트만 실행
-python bnf_main.py --mode backtest
+python -m bnf --mode backtest
 
 # BNF 실시간 모니터링만 실행  
-python bnf_main.py --mode monitor
+python -m bnf --mode monitor
 
 # BNF 백그라운드 모니터링
-python bnf_main.py --mode monitor-default
+python -m bnf --mode monitor-default
 
 # 백테스트 후 모니터링 (기본값)
-python bnf_main.py --mode both
+python -m bnf --mode both
 ```
 
 ### BNF 텔레그램 알림 설정
@@ -102,7 +105,7 @@ python bnf_main.py --mode both
 #### BNF 백테스트만 실행
 
 ```python
-from bnf_backtest_strategy import BNFCounterTrendBacktest
+from bnf.backtest import BNFCounterTrendBacktest
 
 backtest = BNFCounterTrendBacktest(
     initial_capital=10000,
@@ -115,7 +118,7 @@ print(results)
 #### BNF 실시간 모니터링만 실행
 
 ```python
-from bnf_realtime_monitor import BNFCounterTrendMonitor
+from bnf.monitor import BNFCounterTrendMonitor
 
 monitor = BNFCounterTrendMonitor(
     telegram_bot_token="your_token",
@@ -163,37 +166,25 @@ TSLA           28.91         58.7           2.4            2.8           18.7
 
 ## 🛠️ BNF 설정 커스터마이징
 
-### BNF 백테스트 설정 변경
+### BNF 전략 파라미터 변경
+백테스트와 실시간 모니터링은 `bnf/strategy.py`의 지표·신호 계산을 함께 사용합니다. 한 곳만 수정하면 양쪽에 반영됩니다.
+
 ```python
-# bnf_backtest_strategy.py에서 수정
-class BNFCounterTrendBacktest:
-    def _setup_bnf_parameters(self, strategy_mode):
-        # 보수적 전략
-        if strategy_mode == "conservative":
-            self.rsi_oversold = 25          # 더 강한 과매도
-            self.rsi_overbought = 75        # 더 강한 과매수
-            self.williams_oversold = -85    # 더 강한 과매도
-            self.williams_overbought = -15  # 더 강한 과매수
-            self.volume_threshold = 1.3     # 높은 거래량 요구
-        
-        # 공격적 전략  
-        elif strategy_mode == "aggressive":
-            self.rsi_oversold = 35          # 빠른 진입
-            self.rsi_overbought = 65        # 빠른 진입
-            self.williams_oversold = -75    # 빠른 진입
-            self.williams_overbought = -25  # 빠른 진입
-            self.volume_threshold = 1.1     # 낮은 거래량 요구
+# bnf/strategy.py에서 수정
+@dataclass(frozen=True)
+class BNFParams:
+  max_holding_days: int = 3          # 최대 보유 기간
+  rsi_oversold: float = 35           # 기본값 = balanced 모드
+  ...
+
+  @classmethod
+  def for_mode(cls, strategy_mode):  # conservative / balanced / aggressive 값
+    ...
 ```
 
-### BNF 모니터링 설정 변경
-```python
-# bnf_realtime_monitor.py에서 수정
-class BNFCounterTrendMonitor:
-    def __init__(self):
-        self.watchlist = ['AAPL', 'MSFT', ...]  # BNF 감시 종목
-        self.max_holding_days = 3                # 최대 보유 기간
-        self.alert_cooldown = 3600               # 알림 쿨다운 (초)
-```
+- 감시 종목: `bnf/strategy.py`의 `TOP50_STOCKS`
+- 실시간 모니터링은 balanced 모드 파라미터를 사용합니다.
+- 알림 쿨다운: `bnf/monitor.py`의 `self.alert_cooldown = 3600` (초)
 
 ## 📱 BNF 텔레그램 알림 예시
 
@@ -234,8 +225,9 @@ Williams %R: -18.5
 
 ### 1. BNF 모듈 import 오류
 ```bash
-# BNF 파일이 같은 디렉토리에 있는지 확인
-ls -la bnf_*.py
+# 프로젝트 루트(bnf/ 폴더가 있는 곳)에서 실행하는지 확인
+ls bnf/
+python -m bnf --help
 
 # Python 경로 확인
 python -c "import sys; print(sys.path)"
@@ -297,20 +289,20 @@ results = backtest.run_multi_stock_backtest(
 
 ### Ubuntu/Linux
 ```bash
-# BNF 백그라운드 실행
-nohup python bnf_main.py --mode monitor-default > /dev/null 2>&1 &
+# BNF 백그라운드 실행 / 상태 / 로그 / 종료
+scripts/start_monitor.sh
+scripts/status_monitor.sh
+scripts/view_logs.sh
+scripts/stop_monitor.sh
 
-# 실행 상태 확인
-ps aux | grep bnf_main
-
-# 종료
-pkill -f bnf_main.py
+# systemd 서비스로 등록 (bnf-monitor)
+scripts/install_service.sh
 ```
 
 ### Windows
 ```cmd
 # BNF 백그라운드 실행
-start /b python bnf_main.py --mode monitor-default
+start /b python -m bnf --mode monitor-default
 
 # 작업 관리자에서 python.exe 프로세스 종료
 ```
