@@ -1,5 +1,9 @@
 # BNF 역추세 트레이딩 시스템 (타카시 코테가와 스타일)
 
+[![Python](https://img.shields.io/badge/Python-3-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![yfinance](https://img.shields.io/badge/yfinance-410093)](https://pypi.org/project/yfinance/)
+[![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots)
+
 타카시 코테가와(BNF)의 전설적인 역추세 전략을 기반으로 한 자동 트레이딩 시스템입니다.
 
 ## 🎯 BNF 전략 개요
